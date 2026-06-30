@@ -1,0 +1,24 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# SQLite databases
+*.db
+
+# FAISS index and metadata files
+*.index
+*.pkl
+
+# Editor / IDE configurations
+.vscode/
+.idea/
+.project
+.pydevproject
