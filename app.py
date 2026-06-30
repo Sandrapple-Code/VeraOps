@@ -7,15 +7,11 @@ from db.sqlite import add_patient, get_patient, get_all_patients
 from llm.groq_client import generate_response
 
 # Import RAG/Vector Store modules
-from rag.document_store import search_docs, create_doc_embeddings, save_faiss_index
-from rag.patient_store import (
-    create_patient_text,
-    embed_patient,
-    add_patient_vector,
-    search_similar_patients
-)
+from rag.document_store import create_doc_embeddings, save_faiss_index
+from rag.patient_store import create_patient_text, embed_patient, add_patient_vector
 from rag.loader import load_pdf
 from rag.chunker import chunk_text
+from rag.rag_pipeline import answer_query
 
 st.set_page_config(page_title="VeraOps", layout="wide")
 
@@ -123,68 +119,54 @@ elif menu == "AI Assistant":
     st.subheader("VeraOps AI Assistant")
 
     api_key = st.text_input("Enter Groq API Key", type="password")
-
-    # Options to use RAG references
-    use_rag_docs = st.checkbox("Include Hospital Guidelines (SOPs)", value=True)
-    use_rag_patients = st.checkbox("Find Similar Patient Cases", value=True)
+    
+    # Optional Patient ID input
+    patient_id = st.text_input("Enter Patient ID (Optional)")
 
     query = st.text_area("Ask a clinical or operational question:")
 
-    if st.button("Generate Response"):
+    if st.button("Ask VeraOps"):
         if not api_key:
             st.warning("Please enter Groq API key")
         elif not query.strip():
             st.warning("Please enter a query")
         else:
-            context_docs = ""
-            context_patients = ""
-            
-            # Retrieve relevant SOP documents
-            if use_rag_docs:
+            with st.spinner("VeraOps is analyzing guidelines, matching cases, and generating an answer..."):
                 try:
-                    doc_results = search_docs(query, k=2)
-                    if doc_results:
-                        context_docs = "\n\nRelevant Hospital Guidelines / SOPs:\n" + "\n".join(
-                            [f"- {r['text']}" for r in doc_results]
-                        )
-                except Exception as e:
-                    st.warning(f"Could not retrieve SOP guidelines: {e}")
-            
-            # Retrieve similar cases
-            if use_rag_patients:
-                try:
-                    patient_results = search_similar_patients(query, k=2)
-                    if patient_results:
-                        context_patients = "\n\nSimilar Clinical Cases:\n" + "\n".join(
-                            [f"- {r['text']}" for r in patient_results]
-                        )
-                except Exception as e:
-                    st.warning(f"Could not retrieve similar clinical cases: {e}")
-            
-            # Construct final prompt with retrieved context
-            final_prompt = query
-            if context_docs or context_patients:
-                final_prompt = (
-                    f"You are an AI Hospital Assistant. Use the following context to help answer the user query.\n"
-                    f"{context_docs}"
-                    f"{context_patients}\n\n"
-                    f"User Query: {query}\n"
-                    f"Assistant Answer:"
-                )
-            
-            with st.spinner("Generating answer from Groq..."):
-                try:
-                    response = generate_response(api_key, final_prompt)
-                    st.subheader("Response")
-                    st.write(response)
+                    result = answer_query(api_key, query, patient_id)
                     
-                    # Collapsible context details
-                    if context_docs or context_patients:
-                        with st.expander("Show Retrieved Reference Context"):
-                            if context_docs:
-                                st.write("**Guidelines Context:**", context_docs)
-                            if context_patients:
-                                st.write("**Similar Cases Context:**", context_patients)
+                    st.subheader("Generated Answer")
+                    st.write(result["answer"])
+                    
+                    # Explanations / retrieved sources
+                    st.write("---")
+                    st.subheader("Reference & Explainability Sources")
+                    
+                    # Display structured patient if retrieved
+                    if result.get("patient_record"):
+                        with st.expander("Current Patient Structured Record"):
+                            st.json(result["patient_record"])
+                            
+                    # Display retrieved SOP documents
+                    with st.expander(f"Retrieved Hospital Guidelines (SOPs) - Count: {len(result['documents'])}"):
+                        if result["documents"]:
+                            for idx, doc in enumerate(result["documents"], 1):
+                                st.markdown(f"**Source Chunk {idx} (L2 Distance: {doc['distance']:.4f})**")
+                                st.write(doc["text"])
+                                st.write("-" * 20)
+                        else:
+                            st.write("No matching hospital guidelines found.")
+                            
+                    # Display retrieved similar patients
+                    with st.expander(f"Retrieved Similar Historical Cases - Count: {len(result['patients'])}"):
+                        if result["patients"]:
+                            for idx, pat in enumerate(result["patients"], 1):
+                                st.markdown(f"**Case {idx} (Patient ID: {pat['patient_id']} | L2 Distance: {pat['distance']:.4f})**")
+                                st.text(pat["text"])
+                                st.write("-" * 20)
+                        else:
+                            st.write("No similar historical cases found.")
+                            
                 except Exception as e:
                     st.error(f"Failed to generate response: {e}")
 
