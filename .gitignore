@@ -22,3 +22,7 @@ __pycache__/
 .idea/
 .project
 .pydevproject
+
+# Generated clinical documents
+patient_documents/
+hospital_docs/
