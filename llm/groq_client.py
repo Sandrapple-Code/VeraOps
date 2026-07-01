@@ -20,7 +20,7 @@ def get_groq_client(api_key: str) -> Groq:
 
 def generate_response(api_key: str, prompt: str) -> str:
     """
-    Generates a response from the llama3-70b-8192 model using the provided API key and prompt.
+    Generates a response from the llama-3.3-70b-versatile model using the provided API key and prompt.
     
     :param api_key: User-provided Groq API key.
     :param prompt: Prompt text to send to the LLM.
@@ -40,7 +40,7 @@ def generate_response(api_key: str, prompt: str) -> str:
                     "content": prompt.strip()
                 }
             ],
-            model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
         )
         
         # Access response content safely
