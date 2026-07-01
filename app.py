@@ -8,6 +8,10 @@ from llm.groq_client import generate_response
 
 # Import RAG/Vector Store modules
 import json
+import importlib
+import rag.loader
+importlib.reload(rag.loader)
+
 from rag.patient_store import create_patient_text, embed_patient, add_patient_vector
 from rag.ingestion import check_needs_rebuild, rebuild_knowledge_base, get_knowledge_base_stats
 from agents import run_agent
