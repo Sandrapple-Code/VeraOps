@@ -7,9 +7,10 @@ from db.sqlite import add_patient, get_patient, get_all_patients
 from llm.groq_client import generate_response
 
 # Import RAG/Vector Store modules
+import json
 from rag.patient_store import create_patient_text, embed_patient, add_patient_vector
-from rag.rag_pipeline import answer_query
 from rag.ingestion import check_needs_rebuild, rebuild_knowledge_base, get_knowledge_base_stats
+from agents import run_agent
 
 st.set_page_config(page_title="VeraOps", layout="wide")
 
@@ -142,41 +143,45 @@ elif menu == "AI Assistant":
         elif not query.strip():
             st.warning("Please enter a query")
         else:
-            with st.spinner("VeraOps is analyzing guidelines, matching cases, and generating an answer..."):
+            # Initialize session state chat history if missing
+            if "chat_history" not in st.session_state:
+                st.session_state.chat_history = []
+                
+            with st.spinner("VeraOps agent is reasoning, selecting tools, and processing guidelines..."):
                 try:
-                    result = answer_query(api_key, query, patient_id)
+                    # Run the LangGraph agent
+                    result = run_agent(query, st.session_state.chat_history, api_key)
+                    
+                    # Update local session history
+                    st.session_state.chat_history.append({"role": "user", "content": query})
+                    st.session_state.chat_history.append({"role": "assistant", "content": result["final_response"]})
                     
                     st.subheader("Generated Answer")
-                    st.write(result["answer"])
+                    st.markdown(result["final_response"])
                     
-                    # Explanations / retrieved sources
+                    # Explainability & Observability details
                     st.write("---")
                     st.subheader("Reference & Explainability Sources")
                     
-                    # Display structured patient if retrieved
-                    if result.get("patient_record"):
-                        with st.expander("Current Patient Structured Record"):
-                            st.json(result["patient_record"])
-                            
-                    # Display retrieved SOP documents
-                    with st.expander(f"Retrieved Hospital Guidelines (SOPs) - Count: {len(result['documents'])}"):
-                        if result["documents"]:
-                            for idx, doc in enumerate(result["documents"], 1):
-                                st.markdown(f"**Source Chunk {idx} (L2 Distance: {doc['distance']:.4f})**")
-                                st.write(doc["text"])
+                    # 1. Tool execution sequence summary
+                    with st.expander(f"Tool Execution Logs - Count: {len(result['tool_runs'])}"):
+                        if result["tool_runs"]:
+                            for idx, run in enumerate(result["tool_runs"], 1):
+                                st.markdown(f"**Step {idx}: Executed `{run['tool']}`**")
+                                st.code(f"Arguments: {json.dumps(run['args'], indent=2)}")
+                                st.markdown("**Output Preview:**")
+                                st.write(run["result_summary"])
                                 st.write("-" * 20)
                         else:
-                            st.write("No matching hospital guidelines found.")
+                            st.write("No tools were required to answer this query.")
                             
-                    # Display retrieved similar patients
-                    with st.expander(f"Retrieved Similar Historical Cases - Count: {len(result['patients'])}"):
-                        if result["patients"]:
-                            for idx, pat in enumerate(result["patients"], 1):
-                                st.markdown(f"**Case {idx} (Patient ID: {pat['patient_id']} | L2 Distance: {pat['distance']:.4f})**")
-                                st.text(pat["text"])
-                                st.write("-" * 20)
+                    # 2. List of cited resources
+                    with st.expander(f"Cited Resources - Count: {len(result['sources'])}"):
+                        if result["sources"]:
+                            for s in result["sources"]:
+                                st.markdown(f"- **{s}**")
                         else:
-                            st.write("No similar historical cases found.")
+                            st.write("No database records or clinical documents were explicitly cited.")
                             
                 except Exception as e:
                     st.error(f"Failed to generate response: {e}")
