@@ -5,9 +5,10 @@ import pickle
 from typing import List, Dict, Any
 from rag.embeddings import get_embeddings, get_embedding
 
-# Paths for saving the index and metadata inside the rag/ directory
-INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs.index")
-METADATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs_metadata.pkl")
+# Paths for saving the index and metadata inside the vector_store/hospital_index/ directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+INDEX_PATH = os.path.join(PROJECT_ROOT, "vector_store", "hospital_index", "docs.index")
+METADATA_PATH = os.path.join(PROJECT_ROOT, "vector_store", "hospital_index", "docs_metadata.pkl")
 
 # In-memory store for the current index and chunks
 _index = None
@@ -20,6 +21,10 @@ def get_docs_index() -> faiss.IndexFlatL2:
     """
     global _index, _chunks
     if _index is None:
+        db_dir = os.path.dirname(INDEX_PATH)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+            
         if os.path.exists(INDEX_PATH) and os.path.exists(METADATA_PATH):
             _index = faiss.read_index(INDEX_PATH)
             with open(METADATA_PATH, "rb") as f:
@@ -29,6 +34,24 @@ def get_docs_index() -> faiss.IndexFlatL2:
             _index = faiss.IndexFlatL2(384)
             _chunks = []
     return _index
+
+def clear_document_store() -> None:
+    """
+    Clears the document store from both memory and disk.
+    """
+    global _index, _chunks
+    _index = faiss.IndexFlatL2(384)
+    _chunks = []
+    if os.path.exists(INDEX_PATH):
+        try:
+            os.remove(INDEX_PATH)
+        except Exception:
+            pass
+    if os.path.exists(METADATA_PATH):
+        try:
+            os.remove(METADATA_PATH)
+        except Exception:
+            pass
 
 def create_doc_embeddings(chunks: List[str]) -> None:
     """
@@ -60,6 +83,9 @@ def save_faiss_index(index_path: str = INDEX_PATH, metadata_path: str = METADATA
     """
     global _index, _chunks
     if _index is not None:
+        db_dir = os.path.dirname(index_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         faiss.write_index(_index, index_path)
         with open(metadata_path, "wb") as f:
             pickle.dump(_chunks, f)

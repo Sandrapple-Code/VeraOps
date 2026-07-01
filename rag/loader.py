@@ -24,3 +24,15 @@ def load_pdf(file_path: str) -> str:
         doc.close()
         
     return "\n".join(text_content)
+
+def load_md(file_path: str) -> str:
+    """
+    Loads a Markdown file and returns its text contents.
+    
+    :param file_path: Path to the markdown file.
+    :return: Content of the markdown file as a string.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Markdown file not found at: {file_path}")
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return f.read()
