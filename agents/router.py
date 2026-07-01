@@ -71,9 +71,11 @@ Previously Executed Tool Outputs:
 Analyze the state and determine the next action."""
 
     try:
+        from services.config_service import get_setting
         client = get_groq_client(api_key)
+        model = get_setting("model_selection", "llama-3.3-70b-versatile")
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}

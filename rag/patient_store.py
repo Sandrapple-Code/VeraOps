@@ -106,6 +106,30 @@ def add_patient_vector(patient_id: str, vector: np.ndarray, patient_text: str = 
     # Auto-save index to disk to ensure persistence
     save_patients_index()
 
+def remove_patient_vectors(patient_id: str) -> None:
+    """
+    Removes all vector chunks and metadata corresponding to a specific patient from the FAISS patient index.
+    """
+    global _patient_metadata, _index
+    index = get_patients_index()
+    if index.ntotal == 0:
+        return
+        
+    # Find all indices associated with this patient
+    indices_to_remove = [i for i, meta in enumerate(_patient_metadata) if meta.get("patient_id") == patient_id]
+    if not indices_to_remove:
+        return
+        
+    # Remove from FAISS L2 Flat index
+    ids_to_remove = np.array(indices_to_remove, dtype=np.int64)
+    index.remove_ids(ids_to_remove)
+    
+    # Remove from metadata list
+    _patient_metadata = [meta for i, meta in enumerate(_patient_metadata) if i not in indices_to_remove]
+    
+    # Save the updated index and metadata to disk
+    save_patients_index()
+
 def save_patients_index(index_path: str = INDEX_PATH, metadata_path: str = METADATA_PATH) -> None:
     """
     Saves the patient FAISS index and metadata to disk.
