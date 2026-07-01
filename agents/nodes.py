@@ -206,14 +206,17 @@ Doctor Query: {query}
 Please formulate the clinical response."""
 
     try:
+        from services.config_service import get_setting
         client = get_groq_client(api_key)
+        model = get_setting("model_selection", "llama-3.3-70b-versatile")
+        temperature = get_setting("temperature", 0.1)
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.1
+            temperature=temperature
         )
         response_text = completion.choices[0].message.content
         

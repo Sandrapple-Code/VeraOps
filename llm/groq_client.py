@@ -31,7 +31,10 @@ def generate_response(api_key: str, prompt: str) -> str:
         raise ValueError("Prompt must be a non-empty string.")
         
     try:
+        from services.config_service import get_setting
         client = get_groq_client(api_key)
+        model = get_setting("model_selection", "llama-3.3-70b-versatile")
+        temperature = get_setting("temperature", 0.1)
         
         chat_completion = client.chat.completions.create(
             messages=[
@@ -40,7 +43,8 @@ def generate_response(api_key: str, prompt: str) -> str:
                     "content": prompt.strip()
                 }
             ],
-            model="llama-3.3-70b-versatile",
+            model=model,
+            temperature=temperature,
         )
         
         # Access response content safely

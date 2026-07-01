@@ -163,7 +163,7 @@ def parse_lab_tests(lab_str: str) -> List[Dict[str, str]]:
     return results
 
 def generate_patient_summary(patient: Dict[str, Any]) -> str:
-    return f"""# Patient Summary - {patient.get('Patient ID')}
+    return f"""# Patient Summary - {patient.get('Patient ID', 'N/A')}
 
 ## Demographic Information
 - **Patient ID:** {patient.get('Patient ID', 'N/A')}
@@ -183,15 +183,24 @@ def generate_patient_summary(patient: Dict[str, Any]) -> str:
 - **Assigned Doctor:** {patient.get('Assigned Doctor', 'N/A')}
 - **Ward:** {patient.get('Ward', 'N/A')}
 - **Bed Number:** {patient.get('Bed Number', 'N/A')}
+- **Admission Type:** {patient.get('Admission Type', 'N/A')}
 - **Current Status:** {patient.get('Current Status', 'N/A')}
 
 ## Clinical Information
-- **Diagnosis:** {patient.get('Disease / Diagnosis', 'N/A')}
+- **Chief Complaint:** {patient.get('Chief Complaint', 'N/A')}
+- **Primary Diagnosis:** {patient.get('Disease / Diagnosis', 'N/A')}
 - **Symptoms:** {patient.get('Symptoms', 'N/A')}
 - **Past Medical History:** {patient.get('Past Medical History', 'N/A')}
-- **Allergies:** {patient.get('Allergies', 'N/A')}
+- **Known Allergies:** {patient.get('Allergies', 'N/A')}
 - **Current Medications:** {patient.get('Current Medications', 'N/A')}
-- **Treatment Plan:** {patient.get('Treatment Plan', 'N/A')}
+
+## Measurements & Billing
+- **Height:** {patient.get('Height', 'N/A')} cm
+- **Weight:** {patient.get('Weight', 'N/A')} kg
+- **BMI:** {patient.get('BMI', 'N/A')}
+- **Insurance Provider:** {patient.get('Insurance Provider', 'N/A')}
+- **Insurance Number:** {patient.get('Insurance Number', 'N/A')}
+- **National ID / Hospital ID:** {patient.get('National ID', 'N/A')}
 """
 
 def generate_admission_report(patient: Dict[str, Any]) -> str:
@@ -203,151 +212,91 @@ def generate_admission_report(patient: Dict[str, Any]) -> str:
 - **Admitting Doctor:** {patient.get('Assigned Doctor', 'N/A')}
 - **Department:** {patient.get('Department', 'N/A')}
 - **Ward Allocation:** {patient.get('Ward', 'N/A')} (Bed: {patient.get('Bed Number', 'N/A')})
+- **Admission Type:** {patient.get('Admission Type', 'N/A')}
+- **Current Status:** {patient.get('Current Status', 'N/A')}
 
 ## Chief Complaint & Admission History
-{patient.get('Admission Summary', 'No admission summary available.')}
+{patient.get('Chief Complaint', 'No chief complaint recorded.')}
 
 ## Initial Clinical Presentation
-- **Chief Complaint:** {patient.get('Symptoms', 'N/A')}
-- **Initial Diagnosis:** {patient.get('Disease / Diagnosis', 'N/A')}
+- **Symptoms:** {patient.get('Symptoms', 'N/A')}
+- **Primary Diagnosis:** {patient.get('Disease / Diagnosis', 'N/A')}
+- **Known Allergies:** {patient.get('Allergies', 'NKDA')}
 
-## Admission Orders & Treatment Plan
-{patient.get('Treatment Plan', 'N/A')}
+## Vital Statistics
+- **Height:** {patient.get('Height', 'N/A')} cm
+- **Weight:** {patient.get('Weight', 'N/A')} kg
+- **BMI:** {patient.get('BMI', 'N/A')}
 """
 
 def generate_doctor_notes(patient: Dict[str, Any]) -> str:
-    diagnosis = patient.get('Disease / Diagnosis', '').lower()
-    
-    # Custom remarks to make notes clinically rich and varied based on diagnosis
-    advice_points = []
-    if "diabetes" in diagnosis or "hba1c" in diagnosis:
-        advice_points = [
-            "Monitor pre-prandial and post-prandial blood glucose levels.",
-            "Educate patient on low glycemic index diet and weight management.",
-            "Assess for signs of peripheral neuropathy and diabetic retinopathy."
-        ]
-    elif "asthma" in diagnosis or "copd" in diagnosis or "pneumonia" in diagnosis:
-        advice_points = [
-            "Monitor oxygen saturation (SpO2) continuously; target > 94% on room air.",
-            "Administer bronchodilators/nebulization therapy as scheduled.",
-            "Advise chest physiotherapy and deep breathing exercises."
-        ]
-    elif "stroke" in diagnosis or "ischemic" in diagnosis or "mca" in diagnosis:
-        advice_points = [
-            "Perform scheduled neurological exams and NIH Stroke Scale checks.",
-            "Evaluate swallowing safety before starting any oral intake.",
-            "Initiate early physical therapy and rehabilitation assessments."
-        ]
-    elif "heart failure" in diagnosis or "cardiac" in diagnosis or "infarction" in diagnosis:
-        advice_points = [
-            "Maintain strict intake/output charting and daily weight checks.",
-            "Check serum electrolytes (potassium, magnesium) and kidney function.",
-            "Monitor blood pressure and telemetry for arrhythmia signs."
-        ]
-    elif "fracture" in diagnosis or "trauma" in diagnosis:
-        advice_points = [
-            "Evaluate neurovascular status distal to the injury (pulses, capillary refill).",
-            "Maintain strict immobilization of the affected extremity.",
-            "Educate patient on non-weight-bearing restrictions and pain relief."
-        ]
-    else:
-        advice_points = [
-            "Vitals monitoring every shift.",
-            "Correlate medication compliance with daily laboratory values.",
-            "Follow up on clinical improvements and prepare for discharge planning."
-        ]
-        
-    advice_list = "\n".join([f"- {pt}" for pt in advice_points])
+    return f"""# Doctor Notes
 
-    return f"""# Daily Clinical Notes - Day 1
+## Admission Diagnosis
+{patient.get('Disease / Diagnosis', 'N/A')}
 
-- **Patient ID:** {patient.get('Patient ID', 'N/A')}
-- **Patient Name:** {patient.get('Full Name', 'N/A')}
-- **Date:** {patient.get('Date of Admission', 'N/A')}
-- **Doctor:** {patient.get('Assigned Doctor', 'N/A')}
+## Chief Complaint
+{patient.get('Chief Complaint', 'N/A')}
 
-## Patient Progress & Assessment
-{patient.get('Doctor Notes', 'No notes recorded.')}
+## Symptoms
+{patient.get('Symptoms', 'N/A')}
 
-## Assessment
-Patient is a {patient.get('Age')}yo {patient.get('Gender')} admitted for {patient.get('Disease / Diagnosis')}. 
-Primary symptoms include: {patient.get('Symptoms')}.
+## Initial Assessment
+Patient presented with chief complaints of: {patient.get('Chief Complaint', 'N/A')}.
+Vitals are stable on admission. Mentally alert and oriented x3.
 
-## Plan & Recommendations
-- **Telemetry/Vitals Monitoring:** Continuous telemetry and vitals tracking in the {patient.get('Ward')}.
-- **Dietary:** Follow low-sodium / diabetic / standard protocol diet as ordered.
-- **Intervention:** {patient.get('Treatment Plan')}
-- **Specific Clinical Directives:**
-{advice_list}
+## Clinical Impression
+Admitted for further management of {patient.get('Disease / Diagnosis', 'N/A')}. Patient will be monitored closely in the {patient.get('Ward', 'ward')}.
 """
 
 def generate_prescription(patient: Dict[str, Any]) -> str:
-    presc_str = patient.get('Prescription', '')
-    medicines = parse_prescription(presc_str)
-    
-    md = f"""# Medical Prescription
+    return f"""# Medical Prescription
 
-- **Patient ID:** {patient.get('Patient ID', 'N/A')}
-- **Patient Name:** {patient.get('Full Name', 'N/A')}
-- **Date:** {patient.get('Date of Admission', 'N/A')}
-- **Prescribing Doctor:** {patient.get('Assigned Doctor', 'N/A')}
+## Known Allergies
+{patient.get('Allergies', 'NKDA')}
 
-## Active Medications List
+## Current Medications
+{patient.get('Current Medications', 'None')}
 
-| Medicine Name | Dosage | Frequency | Route / Instructions |
-| :--- | :--- | :--- | :--- |
+## Medication Notes
+Adhere strictly to the recommended treatment. If any adverse symptoms occur, notify the attending physician immediately.
 """
-    if medicines:
-        for m in medicines:
-            md += f"| {m['name']} | {m['dosage']} | {m['frequency']} | {m['instructions']} |\n"
-    else:
-        md += "| N/A | N/A | N/A | No active outpatient prescription recorded | \n"
-        
-    md += f"\n## Doctor Instructions\n- Adhere strictly to the dosage and schedule.\n- Report any adverse reactions immediately to {patient.get('Assigned Doctor')}."
-    return md
 
 def generate_lab_report(patient: Dict[str, Any]) -> str:
-    lab_str = patient.get('Lab Tests Performed', '')
-    labs = parse_lab_tests(lab_str)
-    
-    md = f"""# Laboratory Test Report
+    return f"""# Laboratory Test Report
 
-- **Patient ID:** {patient.get('Patient ID', 'N/A')}
-- **Patient Name:** {patient.get('Full Name', 'N/A')}
-- **Date:** {patient.get('Date of Admission', 'N/A')}
-- **Requested By:** {patient.get('Assigned Doctor', 'N/A')}
-
-## Test Results
-
-| Investigation | Result / Findings | Clinical Remark |
-| :--- | :--- | :--- |
+## Pending Laboratory Investigations
+- CBC (Complete Blood Count)
+- BMP (Basic Metabolic Panel)
+- Liver Function Tests (LFT)
+- Serum Electrolytes
+- Coagulation Profile
 """
-    if labs:
-        for l in labs:
-            md += f"| {l['test']} | {l['result']} | {l['remark']} |\n"
-    else:
-        md += "| Basic Metabolic Panel | Normal | Within reference limits |\n"
-        
-    md += "\n*Note: Normal ranges vary slightly by laboratory. Please correlate clinically.*"
-    return md
 
 def generate_radiology_report(patient: Dict[str, Any]) -> str:
-    rad_tests = patient.get('Radiology Tests')
-    
-    md = f"""# Radiology & Imaging Report
+    return f"""# Radiology & Imaging Report
 
-- **Patient ID:** {patient.get('Patient ID', 'N/A')}
-- **Patient Name:** {patient.get('Full Name', 'N/A')}
-- **Date:** {patient.get('Date of Admission', 'N/A')}
-- **Ordering Physician:** {patient.get('Assigned Doctor', 'N/A')}
-
+## Pending Radiology Investigations
+- Chest X-ray (CXR)
+- Focused assessment / scan based on diagnosis: {patient.get('Disease / Diagnosis', 'N/A')}
 """
-    if rad_tests and rad_tests.strip() and rad_tests.lower() not in ["none", "n/a", "no radiological investigations performed."]:
-        md += f"### Imaging Findings & Interpretation\n{rad_tests}\n"
-    else:
-        md += "No radiological investigations performed.\n"
-        
-    return md
+
+def generate_treatment_plan(patient: Dict[str, Any]) -> str:
+    return f"""# Initial Treatment Plan
+
+## Initial Treatment Plan
+1. Telemetry / Bedside vitals monitoring every 4 hours.
+2. Maintain IV access; start supportive hydration if clinically indicated.
+3. Manage symptoms as per clinical pathway for {patient.get('Disease / Diagnosis', 'N/A')}.
+
+## Monitoring Plan
+- Continuous SpO2 and Blood Pressure monitoring.
+- Track intake/output hourly.
+
+## Follow-up
+- Daily physician rounds.
+- Re-evaluate for potential discharge parameters on clinical stabilization.
+"""
 
 def generate_discharge_summary(patient: Dict[str, Any]) -> str:
     adm_date = patient.get("Date of Admission", "")

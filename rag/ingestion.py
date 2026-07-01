@@ -113,7 +113,10 @@ def rebuild_knowledge_base(progress_callback: Optional[Callable[[float, str], No
     processed_files = 0
     
     # Initialize LangChain RecursiveCharacterSplitter
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    from services.config_service import get_setting
+    c_size = get_setting("chunk_size", 1000)
+    c_overlap = get_setting("chunk_overlap", 200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=c_size, chunk_overlap=c_overlap)
     
     hospital_chunks_count = 0
     patient_chunks_count = 0
@@ -210,3 +213,66 @@ def get_knowledge_base_stats() -> Dict[str, Any]:
         "hospital_vector_count": docs_idx.ntotal,
         "patient_vector_count": patients_idx.ntotal
     }
+
+def index_patient_documents(patient_id: str) -> None:
+    """
+    Incrementally builds/rebuilds FAISS index vector chunks and manifest entries for a single patient's markdown files.
+    """
+    # 1. Remove existing vectors from FAISS
+    from rag.patient_store import remove_patient_vectors, embed_patient, add_patient_vector, save_patients_index
+    remove_patient_vectors(patient_id)
+    
+    # 2. Splitter settings
+    from services.config_service import get_setting
+    c_size = get_setting("chunk_size", 1000)
+    c_overlap = get_setting("chunk_overlap", 200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=c_size, chunk_overlap=c_overlap)
+    
+    # 3. Locate files
+    patient_dir = os.path.join(PATIENT_DOCS_DIR, patient_id)
+    if not os.path.exists(patient_dir):
+        return
+        
+    p_files = glob.glob(os.path.join(patient_dir, "*.md"))
+    for f in p_files:
+        try:
+            text = load_md(f)
+            if text.strip():
+                chunks = splitter.split_text(text)
+                for chunk in chunks:
+                    if chunk.strip():
+                        vector = embed_patient(chunk)
+                        add_patient_vector(patient_id, vector, chunk)
+        except Exception as e:
+            print(f"Error incrementally indexing patient file {f}: {e}")
+            
+    # 4. Save patients index to disk
+    save_patients_index()
+    
+    # 5. Sync/update manifest
+    manifest = {"hospital_docs": {}, "patient_docs": {}}
+    if os.path.exists(MANIFEST_PATH):
+        try:
+            with open(MANIFEST_PATH, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+        except Exception:
+            pass
+            
+    # Remove existing manifest entries for this patient
+    prefix = f"patient_documents/{patient_id}/"
+    to_remove = [k for k in manifest.get("patient_docs", {}) if k.replace("\\", "/").startswith(prefix)]
+    for k in to_remove:
+        del manifest["patient_docs"][k]
+        
+    # Scan current patient documents for this patient and add to manifest
+    for f in p_files:
+        rel_path = os.path.relpath(f, PROJECT_ROOT)
+        manifest["patient_docs"][rel_path] = get_file_metadata(f)
+        
+    # Save updated manifest
+    os.makedirs(os.path.dirname(MANIFEST_PATH), exist_ok=True)
+    try:
+        with open(MANIFEST_PATH, 'w', encoding='utf-8') as f:
+            json.dump(manifest, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save manifest in incremental indexing: {e}")
