@@ -11,6 +11,10 @@ import json
 import importlib
 import rag.loader
 importlib.reload(rag.loader)
+import rag.document_store
+importlib.reload(rag.document_store)
+import rag.patient_store
+importlib.reload(rag.patient_store)
 
 from rag.patient_store import create_patient_text, embed_patient, add_patient_vector
 from rag.ingestion import check_needs_rebuild, rebuild_knowledge_base, get_knowledge_base_stats
