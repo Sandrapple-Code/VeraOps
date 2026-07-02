@@ -113,6 +113,8 @@ Whenever a patient record changes:
 - FAISS vectors are refreshed.
 - AI immediately retrieves the latest information.
 
+### Note - Whatever knowledge base has been used in this project is synthetic and does not include any real information.
+
 ---
 
 # 🧠 Agentic Workflow
@@ -492,6 +494,8 @@ Grounded Response
 ---
 
 # 👨‍💻 Developer
+
+**Sanskriti Shakya**
 
 Developed as an Agentic AI Healthcare project integrating:
 
