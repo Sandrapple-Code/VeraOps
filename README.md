@@ -407,6 +407,12 @@ git clone https://github.com/yourusername/VeraOps.git
 
 Move into project
 
+## Setup
+1. Copy `settings.example.json` to `settings.json`
+2. Get a free API key from https://console.groq.com/keys
+3. Paste your key into `settings.json` as `groq_api_key`
+4. Run the app
+
 ```bash
 cd VeraOps
 ```
