@@ -14,11 +14,31 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "temperature": 0.1
 }
 
+def load_env() -> None:
+    """
+    Loads environment variables from a .env file in the project root if it exists.
+    """
+    env_path = os.path.join(PROJECT_ROOT, ".env")
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        val = val.strip()
+                        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                            val = val[1:-1]
+                        os.environ[key.strip()] = val
+        except Exception:
+            pass
+
 def load_settings() -> Dict[str, Any]:
     """
     Loads configuration settings from settings.json.
     Falls back to environment variables for API Key if not set.
     """
+    load_env()
     settings = DEFAULT_SETTINGS.copy()
     if os.path.exists(SETTINGS_PATH):
         try:
