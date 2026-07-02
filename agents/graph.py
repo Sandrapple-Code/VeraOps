@@ -1,5 +1,6 @@
 import time
 import json
+import os
 from typing import Dict, Any, List
 from langgraph.graph import StateGraph, END
 
@@ -100,21 +101,98 @@ def run_agent(query: str, history: List[Dict[str, str]], api_key: str) -> Dict[s
     print(f"- Execution Time: {execution_time:.2f} seconds")
     print("="*60 + "\n")
     
-    # Clean tool runs summary for Streamlit UI
+    # Clean tool runs summary for Streamlit UI and gather explainability details
     formatted_runs = []
+    tools_used = []
+    hospital_docs = []
+    patient_docs = []
+    chunks_count = 0
+    doc_details = []
+    
     for r in tool_runs:
+        t_name = r["tool"]
+        tools_used.append(t_name)
         result_str = str(r["result"])
+        
+        # Parse outputs for RAG tools to extract explainability metrics
+        if t_name == "hospital_knowledge_search":
+            try:
+                items = json.loads(result_str)
+                if isinstance(items, list):
+                    chunks_count += len(items)
+                    for item in items:
+                        src = item.get("source", "Unknown")
+                        src_name = os.path.basename(src)
+                        page = item.get("page")
+                        page_val = f"Page {page}" if page else "N/A"
+                        dist = item.get("distance", 0.0)
+                        
+                        hospital_docs.append(src_name)
+                        doc_details.append({
+                            "type": "Hospital SOP",
+                            "name": src_name,
+                            "page": page_val,
+                            "score": f"{dist:.4f} (L2 dist)"
+                        })
+            except Exception:
+                pass
+        elif t_name == "patient_history_search":
+            try:
+                items = json.loads(result_str)
+                if isinstance(items, list):
+                    chunks_count += len(items)
+                    for item in items:
+                        pid = item.get("patient_id", "Unknown")
+                        src_file = item.get("source", "Unknown")
+                        dist = item.get("distance", 0.0)
+                        
+                        patient_docs.append(f"{pid}/{src_file}")
+                        doc_details.append({
+                            "type": f"Patient Record ({pid})",
+                            "name": src_file,
+                            "page": "N/A",
+                            "score": f"{dist:.4f} (L2 dist)"
+                        })
+            except Exception:
+                pass
+        elif t_name == "similar_case_search":
+            try:
+                items = json.loads(result_str)
+                if isinstance(items, list):
+                    for item in items:
+                        pid = item.get("patient_id", "Unknown")
+                        dist = item.get("distance", 0.0)
+                        patient_docs.append(f"Similar Case: {pid}")
+                        doc_details.append({
+                            "type": "Similar Case",
+                            "name": f"Patient {pid} profile",
+                            "page": "N/A",
+                            "score": f"{dist:.4f} (L2 dist)"
+                        })
+            except Exception:
+                pass
+                
         if len(result_str) > 200:
             result_str = result_str[:200] + "..."
         formatted_runs.append({
-            "tool": r["tool"],
+            "tool": t_name,
             "args": r["args"],
             "result_summary": result_str
         })
+        
+    explainability_metrics = {
+        "tools_used": sorted(list(set(tools_used))),
+        "hospital_docs": sorted(list(set(hospital_docs))),
+        "patient_docs": sorted(list(set(patient_docs))),
+        "retrieved_chunks_count": chunks_count,
+        "doc_details": doc_details,
+        "memory_used": "Yes" if len(history) > 0 else "No"
+    }
         
     return {
         "final_response": final_state.get("final_response", ""),
         "sources": final_state.get("sources_used", []),
         "tool_runs": formatted_runs,
-        "execution_time": execution_time
+        "execution_time": execution_time,
+        "explainability": explainability_metrics
     }

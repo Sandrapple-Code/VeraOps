@@ -3,7 +3,7 @@ import sys
 import json
 from datetime import datetime
 from langchain_core.tools import tool
-from db.sqlite import update_patient, get_patient, occupy_bed, release_bed
+from db.sqlite import update_patient, get_patient, occupy_bed, release_bed, add_timeline_event
 from rag.ingestion import index_patient_documents
 
 # Add parent path to import generators
@@ -62,8 +62,21 @@ def modify_patient_record(patient_id: str, updates_json: str) -> str:
         if (new_ward != old_ward) or (new_bed != old_bed):
             if new_ward and new_bed:
                 occupy_bed(new_ward, new_bed, patient_id, updated_record.get("date_of_admission") or datetime.now().strftime("%Y-%m-%d"))
+                add_timeline_event(patient_id, "Bed Allocation", f"Transferred to ward {new_ward}, bed {new_bed} via AI Agent.", updated_record.get("assigned_doctor"))
             else:
                 release_bed(patient_id)
+                add_timeline_event(patient_id, "Discharge", f"Released bed allocation via AI Agent.", updated_record.get("assigned_doctor"))
+                
+        # Log to timeline
+        changed_fields = list(updates.keys())
+        if changed_fields:
+            desc = f"Updated clinical/admin fields via AI Agent: {', '.join(changed_fields)}."
+            if "visit_notes" in updates:
+                add_timeline_event(patient_id, "Doctor Notes Added", "Appended clinical progress notes via AI Agent.", updated_record.get("assigned_doctor"))
+            elif "medicines" in updates:
+                add_timeline_event(patient_id, "Prescription Updated", "Prescription modified via AI Agent.", updated_record.get("assigned_doctor"))
+            else:
+                add_timeline_event(patient_id, "Patient Record Updated", desc, updated_record.get("assigned_doctor"))
                 
         # 5. Regenerate Markdown clinical files to keep them synchronized
         doc_dir = os.path.join(PROJECT_ROOT, "patient_documents", patient_id)

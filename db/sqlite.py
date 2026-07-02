@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 # Define the database path to be in the project root directory
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hospital.db")
@@ -190,11 +191,33 @@ def init_db(db_path: str = DB_PATH) -> None:
                     )
             conn.commit()
             print("[MIGRATION] Migrated active patients to new beds.")
+
+        # Create timeline table
+        create_timeline_sql = """
+        CREATE TABLE IF NOT EXISTS patient_timeline (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id TEXT,
+            event_timestamp TEXT,
+            event_type TEXT,
+            doctor TEXT,
+            description TEXT,
+            FOREIGN KEY(patient_id) REFERENCES patients(patient_id)
+        );
+        """
+        conn.execute(create_timeline_sql)
+        conn.commit()
+
+        # Seed timeline events for all existing patients if the timeline table is empty
+        cursor = conn.execute("SELECT COUNT(*) FROM patient_timeline")
+        if cursor.fetchone()[0] == 0:
+            cursor = conn.execute("SELECT patient_id FROM patients")
+            pids = [row["patient_id"] for row in cursor.fetchall()]
+            conn.close()
+            for pid in pids:
+                seed_patient_timeline(pid, db_path)
+            conn = get_connection(db_path)
     finally:
         conn.close()
-
-# Automatically initialize database when the module is imported
-init_db()
 
 def add_patient(data: Dict[str, Any], db_path: str = DB_PATH) -> None:
     """
@@ -427,3 +450,113 @@ def get_next_patient_id(db_path: str = DB_PATH) -> str:
         return "P001"
     finally:
         conn.close()
+
+def seed_patient_timeline(patient_id: str, db_path: str = DB_PATH) -> None:
+    """
+    Generates a default timeline sequence for a patient record during database seeding.
+    """
+    conn = get_connection(db_path)
+    try:
+        # Check if timeline events already exist for this patient
+        cursor = conn.execute("SELECT COUNT(*) FROM patient_timeline WHERE patient_id = ?", (patient_id,))
+        if cursor.fetchone()[0] > 0:
+            return
+            
+        # Get patient details
+        cursor = conn.execute("SELECT * FROM patients WHERE patient_id = ?", (patient_id,))
+        p = cursor.fetchone()
+        if not p:
+            return
+            
+        p_dict = dict(p)
+        name = p_dict.get("name", "Patient")
+        adm_date = p_dict.get("date_of_admission") or "2026-06-15"
+        doctor = p_dict.get("assigned_doctor") or "Staff Physician"
+        ward = p_dict.get("ward")
+        bed = p_dict.get("bed_number")
+        diagnosis = p_dict.get("diagnosis") or "N/A"
+        status = p_dict.get("current_status")
+        
+        # 1. Registered Event
+        conn.execute(
+            "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+            (patient_id, f"{adm_date} 08:30:00", "Patient Registered", doctor, f"Registered new patient {name} (ID: {patient_id}) in system.")
+        )
+        
+        # 2. Admission Event
+        conn.execute(
+            "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+            (patient_id, f"{adm_date} 09:15:00", "Admission", doctor, f"Admitted to {p_dict.get('department', 'General Medicine')} Department.")
+        )
+        
+        # 3. Bed Allocation Event
+        if ward and bed:
+            conn.execute(
+                "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+                (patient_id, f"{adm_date} 09:30:00", "Bed Allocation", doctor, f"Allocated bed {bed} in ward {ward}.")
+            )
+            
+        # 4. Doctor Note Added
+        conn.execute(
+            "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+            (patient_id, f"{adm_date} 10:15:00", "Doctor Notes Added", doctor, f"Initial assessment recorded. Working diagnosis: {diagnosis}.")
+        )
+        
+        # 5. Prescription Updated
+        if p_dict.get("medicines"):
+            conn.execute(
+                "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+                (patient_id, f"{adm_date} 11:00:00", "Prescription Updated", doctor, f"Prescribed: {p_dict.get('medicines')}.")
+            )
+            
+        # 6. Discharge Event (if discharged)
+        if status == "Discharged":
+            dis_date = p_dict.get("date_of_discharge") or adm_date
+            conn.execute(
+                "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+                (patient_id, f"{dis_date} 11:30:00", "Discharge", doctor, f"Discharged from hospital. Final Diagnosis: {diagnosis}.")
+            )
+            
+        conn.commit()
+    except Exception as e:
+        print(f"Error seeding patient timeline: {e}")
+    finally:
+        conn.close()
+
+def add_timeline_event(patient_id: str, event_type: str, description: str, doctor: Optional[str] = None, timestamp: Optional[str] = None, db_path: str = DB_PATH) -> None:
+    """
+    Saves a timeline log event to the SQLite database.
+    """
+    if not timestamp:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO patient_timeline (patient_id, event_timestamp, event_type, doctor, description) VALUES (?, ?, ?, ?, ?)",
+            (patient_id, timestamp, event_type, doctor, description)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error adding timeline event: {e}")
+    finally:
+        conn.close()
+
+def get_patient_timeline(patient_id: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Retrieves all timeline log events for a patient sorted chronologically.
+    """
+    conn = get_connection(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT * FROM patient_timeline WHERE patient_id = ? ORDER BY event_timestamp ASC",
+            (patient_id,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        print(f"Error retrieving timeline events: {e}")
+        return []
+    finally:
+        conn.close()
+
+# Automatically initialize database when the module is imported
+init_db()

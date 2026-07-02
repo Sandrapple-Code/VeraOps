@@ -1,9 +1,15 @@
 import streamlit as st
 import os
+import sys
 import json
 import glob
 from datetime import datetime
 from typing import Dict, Any, List
+
+# Ensure the project root is in sys.path
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
 # Import backend modules
 from db.sqlite import (
@@ -17,7 +23,9 @@ from db.sqlite import (
     get_next_patient_id,
     release_bed,
     occupy_bed,
-    update_patient
+    update_patient,
+    add_timeline_event,
+    get_patient_timeline
 )
 from llm.groq_client import generate_response, get_groq_client
 from rag.ingestion import check_needs_rebuild, rebuild_knowledge_base, get_knowledge_base_stats, index_patient_documents
@@ -665,7 +673,7 @@ else:
             # Clear chat button
             ccol1, ccol2 = st.columns([6, 1])
             with ccol2:
-                if st.button("Clear Thread", use_container_width=True):
+                if st.button("Clear Conversation", use_container_width=True):
                     active_sess["messages"] = []
                     save_chat_sessions(st.session_state.chat_sessions)
                     st.rerun()
@@ -697,6 +705,8 @@ else:
             for msg in messages:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
+                    if msg.get("timestamp"):
+                        st.caption(f"🕒 {msg['timestamp']}")
                     if msg["role"] == "assistant" and "metadata" in msg:
                         meta = msg["metadata"]
                         with st.expander("🛠 Agent Reasoning & Explainability Sources"):
@@ -709,6 +719,38 @@ else:
                                 st.markdown("**Sources Used / Cited:**")
                                 for s in meta["sources"]:
                                     st.write(f"- {s}")
+                        
+                        # How this answer was generated panel
+                        if meta.get("explainability"):
+                            with st.expander("🔍 How this answer was generated", expanded=False):
+                                exp = meta["explainability"]
+                                st.write("**LangGraph Tools Used:**")
+                                if exp.get("tools_used"):
+                                    st.write(", ".join([f"`{t}`" for t in exp["tools_used"]]))
+                                else:
+                                    st.write("None")
+                                st.write("**Conversation Memory Used:**", exp.get("memory_used", "No"))
+                                st.write(f"**Retrieved Chunks Count:** {exp.get('retrieved_chunks_count', 0)}")
+                                
+                                st.write("**Hospital Documents Retrieved:**")
+                                if exp.get("hospital_docs"):
+                                    st.write(", ".join([f"`{d}`" for d in exp["hospital_docs"]]))
+                                else:
+                                    st.write("None")
+                                
+                                st.write("**Patient Documents Retrieved:**")
+                                if exp.get("patient_docs"):
+                                    st.write(", ".join([f"`{d}`" for d in exp["patient_docs"]]))
+                                else:
+                                    st.write("None")
+                                    
+                                if exp.get("doc_details"):
+                                    st.markdown("**Matched Documents Details & FAISS Distances:**")
+                                    st.table(exp["doc_details"])
+                        
+                        # Copy Response expander
+                        with st.expander("📋 Copy Response", expanded=False):
+                            st.code(msg["content"], language="markdown")
                                     
             # Set prompt value if suggest button clicked
             query = st.chat_input("Enter your clinical or operational question:")
@@ -719,6 +761,8 @@ else:
             if query:
                 with st.chat_message("user"):
                     st.markdown(query)
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    st.caption(f"🕒 {ts}")
                     
                 if not api_key:
                     st.error("Please add your Groq API Key in the Settings page to run queries.")
@@ -726,33 +770,62 @@ else:
                     with st.spinner("VeraOps agent is reasoning, selecting tools, and processing guidelines..."):
                         try:
                             result = run_agent(query, messages, api_key)
+                            ts_assistant = datetime.now().strftime("%Y-%m-%d %H:%M")
                             
                             with st.chat_message("assistant"):
                                 st.markdown(result["final_response"])
-                                with st.expander("🛠 Agent Reasoning & Explainability Sources"):
-                                    st.write(f"⏱ **Response Time**: {result['execution_time']:.2f} seconds")
-                                    if result.get("tool_runs"):
-                                        st.markdown("**Tools Executed:**")
-                                        for t in result["tool_runs"]:
-                                            st.code(f"Tool: {t['tool']} | Args: {json.dumps(t['args'])}")
-                                    if result.get("sources"):
-                                        st.markdown("**Sources Used / Cited:**")
-                                        for s in result["sources"]:
-                                            st.write(f"- {s}")
+                                st.caption(f"🕒 {ts_assistant}")
+                                
+                                # Render Explainability immediately
+                                if result.get("explainability"):
+                                    with st.expander("🔍 How this answer was generated", expanded=False):
+                                        exp = result["explainability"]
+                                        st.write("**LangGraph Tools Used:**")
+                                        if exp.get("tools_used"):
+                                            st.write(", ".join([f"`{t}`" for t in exp["tools_used"]]))
+                                        else:
+                                            st.write("None")
+                                        st.write("**Conversation Memory Used:**", exp.get("memory_used", "No"))
+                                        st.write(f"**Retrieved Chunks Count:** {exp.get('retrieved_chunks_count', 0)}")
+                                        
+                                        st.write("**Hospital Documents Retrieved:**")
+                                        if exp.get("hospital_docs"):
+                                            st.write(", ".join([f"`{d}`" for d in exp["hospital_docs"]]))
+                                        else:
+                                            st.write("None")
+                                        
+                                        st.write("**Patient Documents Retrieved:**")
+                                        if exp.get("patient_docs"):
+                                            st.write(", ".join([f"`{d}`" for d in exp["patient_docs"]]))
+                                        else:
+                                            st.write("None")
                                             
+                                        if exp.get("doc_details"):
+                                            st.markdown("**Matched Documents Details & FAISS Distances:**")
+                                            st.table(exp["doc_details"])
+                                
+                                with st.expander("📋 Copy Response", expanded=False):
+                                    st.code(result["final_response"], language="markdown")
+                                    
                             # Update active session title if default
                             if active_sess["title"] == "New Chat Thread" or len(messages) == 0:
                                 title_text = query[:25] + ("..." if len(query) > 25 else "")
                                 active_sess["title"] = title_text
                                 
-                            messages.append({"role": "user", "content": query})
+                            messages.append({
+                                "role": "user",
+                                "content": query,
+                                "timestamp": ts
+                            })
                             messages.append({
                                 "role": "assistant",
                                 "content": result["final_response"],
+                                "timestamp": ts_assistant,
                                 "metadata": {
                                     "execution_time": result["execution_time"],
                                     "tool_runs": result["tool_runs"],
-                                    "sources": result["sources"]
+                                    "sources": result["sources"],
+                                    "explainability": result["explainability"]
                                 }
                             })
                             
@@ -934,7 +1007,7 @@ else:
                 p_dict = dict(p_record)
                 
                 # Tabs
-                w_tab1, w_tab2, w_tab3, w_tab4, w_tab5, w_tab6, w_tab7, w_tab8 = st.tabs([
+                w_tab1, w_tab2, w_tab3, w_tab4, w_tab5, w_tab6, w_tab7, w_tab8, w_tab9 = st.tabs([
                     "📋 Patient Summary",
                     "📝 Doctor Notes",
                     "💊 Prescription",
@@ -942,7 +1015,8 @@ else:
                     "🩻 Radiology",
                     "📋 Treatment Plan",
                     "🚪 Discharge",
-                    "🤖 AI Clinical Summary"
+                    "🤖 AI Clinical Summary",
+                    "📈 Patient Timeline"
                 ])
                 
                 # Tab 1: Patient Summary
@@ -1016,6 +1090,7 @@ else:
                                     f.write(appended_content)
                                 updated_notes_field = (p_dict.get("visit_notes") or "") + appended_content
                                 update_patient(selected_pt_id, {"visit_notes": updated_notes_field})
+                                add_timeline_event(selected_pt_id, "Doctor Notes Added", f"Appended clinical progress note: '{new_note.strip()[:100]}...'", doctor=p_dict.get("assigned_doctor"))
                                 index_patient_documents(selected_pt_id)
                                 st.success("Doctor note appended and patient RAG index refreshed!")
                                 st.rerun()
@@ -1082,6 +1157,7 @@ else:
                                     medicines_field = f"{rx_med.strip()} {rx_dosage.strip()} {rx_freq.strip()}"
                                     
                                 update_patient(selected_pt_id, {"medicines": medicines_field})
+                                add_timeline_event(selected_pt_id, "Prescription Updated", f"Added medication: {rx_med.strip()} {rx_dosage.strip()} {rx_freq.strip()}.", doctor=p_dict.get("assigned_doctor"))
                                 index_patient_documents(selected_pt_id)
                                 st.success("Prescription updated successfully!")
                                 st.rerun()
@@ -1121,6 +1197,7 @@ else:
                                 try:
                                     with open(lab_file, "a", encoding="utf-8") as f:
                                         f.write(new_content)
+                                    add_timeline_event(selected_pt_id, "Lab Updates", f"Updated laboratory findings report manually: '{lab_findings.strip()[:100]}...'", doctor=p_dict.get("assigned_doctor"))
                                     index_patient_documents(selected_pt_id)
                                     st.success("Lab report updated!")
                                     st.rerun()
@@ -1136,6 +1213,7 @@ else:
                                     uploaded_txt = lab_upload.read().decode("utf-8")
                                     with open(lab_file, "w", encoding="utf-8") as f:
                                         f.write(uploaded_txt)
+                                    add_timeline_event(selected_pt_id, "Lab Updates", f"Uploaded laboratory findings report file: {lab_upload.name}.", doctor=p_dict.get("assigned_doctor"))
                                     index_patient_documents(selected_pt_id)
                                     st.success("Uploaded lab report saved and indexed!")
                                     st.rerun()
@@ -1173,6 +1251,7 @@ else:
                                 try:
                                     with open(rad_file, "a", encoding="utf-8") as f:
                                         f.write(new_content)
+                                    add_timeline_event(selected_pt_id, "Radiology Updates", f"Updated radiology findings report manually: '{rad_findings.strip()[:100]}...'", doctor=p_dict.get("assigned_doctor"))
                                     index_patient_documents(selected_pt_id)
                                     st.success("Radiology report updated!")
                                     st.rerun()
@@ -1188,6 +1267,7 @@ else:
                                     uploaded_txt = rad_upload.read().decode("utf-8")
                                     with open(rad_file, "w", encoding="utf-8") as f:
                                         f.write(uploaded_txt)
+                                    add_timeline_event(selected_pt_id, "Radiology Updates", f"Uploaded radiology findings report file: {rad_upload.name}.", doctor=p_dict.get("assigned_doctor"))
                                     index_patient_documents(selected_pt_id)
                                     st.success("Uploaded radiology report saved and indexed!")
                                     st.rerun()
@@ -1228,6 +1308,7 @@ else:
                         try:
                             with open(tx_file, "a", encoding="utf-8") as f:
                                 f.write(new_content)
+                            add_timeline_event(selected_pt_id, "Treatment Plan Updates", f"Updated treatment plan: {tx_treatment.strip()[:100]}...", doctor=p_dict.get("assigned_doctor"))
                             index_patient_documents(selected_pt_id)
                             st.success("Treatment plan updated and patient vectors refreshed!")
                             st.rerun()
@@ -1285,6 +1366,7 @@ else:
                                 with open(dis_path, "w", encoding="utf-8") as f:
                                     f.write(generate_discharge_summary(gen_dis_data))
                                     
+                                add_timeline_event(selected_pt_id, "Discharge", f"Patient discharged from ward {p_dict.get('ward') or 'N/A'}. Final Diagnosis: {dis_diagnosis}.", doctor=p_dict.get("assigned_doctor"))
                                 index_patient_documents(selected_pt_id)
                                 
                                 st.success("Patient discharged successfully! Bed released and FAISS index updated.")
@@ -1333,6 +1415,7 @@ else:
                                 try:
                                     with open(summary_path, "w", encoding="utf-8") as f:
                                         f.write(st.session_state.ai_clinical_summary_result)
+                                    add_timeline_event(selected_pt_id, "AI Clinical Summary", "Generated and saved AI clinical summary report.", doctor=p_dict.get("assigned_doctor"))
                                     index_patient_documents(selected_pt_id)
                                     st.success("Saved AI Clinical Summary as 'ai_clinical_summary.md' and refreshed Patient RAG index!")
                                     del st.session_state.ai_clinical_summary_result
@@ -1341,141 +1424,221 @@ else:
                                 except Exception as e:
                                     st.error(f"Failed to save AI Clinical Summary: {e}")
 
+                # Tab 9: Patient Timeline
+                with w_tab9:
+                    st.subheader("Patient Chronological Timeline")
+                    timeline_events = get_patient_timeline(selected_pt_id)
+                    if not timeline_events:
+                        st.info("No timeline events logged for this patient.")
+                    else:
+                        st.markdown("Chronological list of all medical and administrative events:")
+                        for event in timeline_events:
+                            with st.container(border=True):
+                                t_col1, t_col2 = st.columns([3, 1])
+                                with t_col1:
+                                    st.markdown(f"#### 🏷️ Event: {event['event_type']}")
+                                with t_col2:
+                                    st.caption(f"🕒 {event['event_timestamp']}")
+                                    
+                                if event.get("doctor") and event["doctor"] != "None":
+                                    st.write(f"🧑‍⚕️ **Responsible**: {event['doctor']}")
+                                st.write(f"📝 **Description**: {event['description']}")
+
     # -----------------------------
     # 5. PATIENT DIRECTORY
     # -----------------------------
     elif menu == "📋 Patient Directory":
-        st.title("📋 Patient Directory")
-        st.markdown("Searchable, sortable, and filtered master directory of all registered hospital records.")
+        st.title("📋 Patient Directory & Case Search")
         
         patients = get_all_patients()
         
-        if not patients:
-            st.info("No patient records exist in SQLite database.")
-        else:
-            with st.expander("🔍 Filter & Sort Patients", expanded=True):
-                col_f1, col_f2, col_f3 = st.columns(3)
-                with col_f1:
-                    global_search = st.text_input("Global Search (ID, Name, Diagnosis)", key="dir_search")
-                    gender_options = ["All"] + sorted(list({p["gender"] for p in patients if p.get("gender")}))
-                    sel_gender = st.selectbox("Gender", gender_options)
-                    
-                    ward_options = ["All"] + [
-                        "Cardiology", "Neurology", "Orthopedics", "Emergency", "ICU",
-                        "General Medicine", "Pulmonology", "Nephrology", "Pediatrics", "Surgery"
-                    ]
-                    sel_ward = st.selectbox("Ward", ward_options)
-                    
-                with col_f2:
-                    dept_options = ["All"] + sorted(list({p["department"] for p in patients if p.get("department")}))
-                    sel_dept = st.selectbox("Department", dept_options)
-                    
-                    doc_options = ["All"] + sorted(list({p["assigned_doctor"] for p in patients if p.get("assigned_doctor")}))
-                    sel_doc = st.selectbox("Assigned Doctor", doc_options)
-                    
-                    status_options = ["All"] + sorted(list({p["current_status"] for p in patients if p.get("current_status")}))
-                    sel_status = st.selectbox("Current Status", status_options)
-                    
-                with col_f3:
-                    ages = [int(p["age"]) for p in patients if p.get("age") is not None]
-                    min_age = min(ages) if ages else 0
-                    max_age = max(ages) if ages else 120
-                    sel_age_range = st.slider("Age Range", int(min_age), int(max_age), (int(min_age), int(max_age)))
-                    sel_adm_date = st.text_input("Admission Date (YYYY-MM-DD)", placeholder="All")
-                    
-                    sort_by = st.selectbox("Sort By", ["Patient ID", "Name", "Age", "Admission Date"])
-                    sort_order = st.radio("Order", ["Ascending", "Descending"], horizontal=True)
+        dir_tab1, dir_tab2 = st.tabs(["📋 Patient Master Directory", "🔍 Similar Patient Search"])
+        
+        with dir_tab1:
+            st.markdown("Searchable, sortable, and filtered master directory of all registered hospital records.")
+            if not patients:
+                st.info("No patient records exist in SQLite database.")
+            else:
+                with st.expander("🔍 Filter & Sort Patients", expanded=True):
+                    col_f1, col_f2, col_f3 = st.columns(3)
+                    with col_f1:
+                        global_search = st.text_input("Global Search (ID, Name, Diagnosis)", key="dir_search")
+                        gender_options = ["All"] + sorted(list({p["gender"] for p in patients if p.get("gender")}))
+                        sel_gender = st.selectbox("Gender", gender_options)
+                        
+                        ward_options = ["All"] + [
+                            "Cardiology", "Neurology", "Orthopedics", "Emergency", "ICU",
+                            "General Medicine", "Pulmonology", "Nephrology", "Pediatrics", "Surgery"
+                        ]
+                        sel_ward = st.selectbox("Ward", ward_options)
+                        
+                    with col_f2:
+                        dept_options = ["All"] + sorted(list({p["department"] for p in patients if p.get("department")}))
+                        sel_dept = st.selectbox("Department", dept_options)
+                        
+                        doc_options = ["All"] + sorted(list({p["assigned_doctor"] for p in patients if p.get("assigned_doctor")}))
+                        sel_doc = st.selectbox("Assigned Doctor", doc_options)
+                        
+                        status_options = ["All"] + sorted(list({p["current_status"] for p in patients if p.get("current_status")}))
+                        sel_status = st.selectbox("Current Status", status_options)
+                        
+                    with col_f3:
+                        ages = [int(p["age"]) for p in patients if p.get("age") is not None]
+                        min_age = min(ages) if ages else 0
+                        max_age = max(ages) if ages else 120
+                        sel_age_range = st.slider("Age Range", int(min_age), int(max_age), (int(min_age), int(max_age)))
+                        sel_adm_date = st.text_input("Admission Date (YYYY-MM-DD)", placeholder="All")
+                        
+                        sort_by = st.selectbox("Sort By", ["Patient ID", "Name", "Age", "Admission Date"])
+                        sort_order = st.radio("Order", ["Ascending", "Descending"], horizontal=True)
 
-            # Apply Filtering
-            filtered_patients = []
-            for p in patients:
-                if global_search:
-                    q = global_search.lower()
-                    id_match = q in str(p.get("patient_id", "")).lower()
-                    name_match = q in str(p.get("name", "")).lower()
-                    diag_match = q in str(p.get("diagnosis", "")).lower()
-                    if not (id_match or name_match or diag_match):
+                # Apply Filtering
+                filtered_patients = []
+                for p in patients:
+                    if global_search:
+                        q = global_search.lower()
+                        id_match = q in str(p.get("patient_id", "")).lower()
+                        name_match = q in str(p.get("name", "")).lower()
+                        diag_match = q in str(p.get("diagnosis", "")).lower()
+                        if not (id_match or name_match or diag_match):
+                            continue
+                            
+                    if sel_gender != "All" and p.get("gender") != sel_gender:
                         continue
-                        
-                if sel_gender != "All" and p.get("gender") != sel_gender:
-                    continue
-                if sel_dept != "All" and p.get("department") != sel_dept:
-                    continue
-                if sel_doc != "All" and p.get("assigned_doctor") != sel_doc:
-                    continue
-                if sel_ward != "All" and p.get("ward") != sel_ward:
-                    continue
-                if sel_status != "All" and p.get("current_status") != sel_status:
-                    continue
-                age_val = p.get("age")
-                if age_val is not None:
-                    if not (sel_age_range[0] <= int(age_val) <= sel_age_range[1]):
+                    if sel_dept != "All" and p.get("department") != sel_dept:
                         continue
-                if sel_adm_date and sel_adm_date.strip():
-                    if sel_adm_date.strip() not in str(p.get("date_of_admission", "")):
+                    if sel_doc != "All" and p.get("assigned_doctor") != sel_doc:
                         continue
-                        
-                filtered_patients.append(p)
+                    if sel_ward != "All" and p.get("ward") != sel_ward:
+                        continue
+                    if sel_status != "All" and p.get("current_status") != sel_status:
+                        continue
+                    age_val = p.get("age")
+                    if age_val is not None:
+                        if not (sel_age_range[0] <= int(age_val) <= sel_age_range[1]):
+                            continue
+                    if sel_adm_date and sel_adm_date.strip():
+                        if sel_adm_date.strip() not in str(p.get("date_of_admission", "")):
+                            continue
+                            
+                    filtered_patients.append(p)
+                    
+                # Apply Sorting
+                key_map = {
+                    "Patient ID": "patient_id",
+                    "Name": "name",
+                    "Age": "age",
+                    "Admission Date": "date_of_admission"
+                }
+                sort_key = key_map.get(sort_by, "patient_id")
                 
-            # Apply Sorting
-            key_map = {
-                "Patient ID": "patient_id",
-                "Name": "name",
-                "Age": "age",
-                "Admission Date": "date_of_admission"
-            }
-            sort_key = key_map.get(sort_by, "patient_id")
+                if sort_key == "age":
+                    filtered_patients.sort(key=lambda x: int(x.get("age") or 0), reverse=(sort_order == "Descending"))
+                else:
+                    filtered_patients.sort(key=lambda x: str(x.get(sort_key) or ""), reverse=(sort_order == "Descending"))
+                    
+                # Pagination
+                st.markdown(f"**Found {len(filtered_patients)} patients**")
+                page_size = st.selectbox("Rows per page", [10, 25, 50], index=0)
+                total_pages = (len(filtered_patients) + page_size - 1) // page_size
+                
+                if total_pages > 1:
+                    current_page = st.number_input("Page Selector", min_value=1, max_value=total_pages, value=1)
+                else:
+                    current_page = 1
+                    
+                start_idx = (current_page - 1) * page_size
+                end_idx = min(start_idx + page_size, len(filtered_patients))
+                page_pts = filtered_patients[start_idx:end_idx]
+                
+                if page_pts:
+                    table_data = []
+                    for p in page_pts:
+                        table_data.append({
+                            "Patient ID": p.get("patient_id"),
+                            "Name": p.get("name"),
+                            "Age": p.get("age"),
+                            "Gender": p.get("gender"),
+                            "Department": p.get("department"),
+                            "Assigned Doctor": p.get("assigned_doctor"),
+                            "Ward": p.get("ward") or "Discharged",
+                            "Bed": p.get("bed_number") or "N/A",
+                            "Diagnosis": p.get("diagnosis"),
+                            "Status": p.get("current_status"),
+                            "Admission Date": p.get("date_of_admission"),
+                            "Discharge Date": p.get("date_of_discharge") or "N/A"
+                        })
+                    st.dataframe(table_data, use_container_width=True)
+                    
+                    st.write("---")
+                    st.subheader("Profile Selection")
+                    target_options = {f"{p['patient_id']} - {p['name']}": p['patient_id'] for p in page_pts}
+                    selected_open_id = st.selectbox("Select Patient to Open Profile", list(target_options.keys()))
+                    actual_id = target_options[selected_open_id]
+                    
+                    if st.button("🩺 Open Patient Profile in Doctor Workspace", use_container_width=True):
+                        st.session_state.selected_patient_id = actual_id
+                        st.session_state.current_page = "🩺 Doctor Workspace"
+                        st.rerun()
+                else:
+                    st.info("No records match your criteria.")
+                    
+        with dir_tab2:
+            st.subheader("Semantic Similar Case Search")
+            st.markdown("Query the FAISS vector database to retrieve historical cases with matching symptoms or clinical history, alongside their SQLite database records.")
             
-            if sort_key == "age":
-                filtered_patients.sort(key=lambda x: int(x.get("age") or 0), reverse=(sort_order == "Descending"))
-            else:
-                filtered_patients.sort(key=lambda x: str(x.get(sort_key) or ""), reverse=(sort_order == "Descending"))
-                
-            # Pagination
-            st.markdown(f"**Found {len(filtered_patients)} patients**")
-            page_size = st.selectbox("Rows per page", [10, 25, 50], index=0)
-            total_pages = (len(filtered_patients) + page_size - 1) // page_size
+            sim_query = st.text_input("Enter clinical symptoms or diagnosis query (e.g. 'fever with productive cough and chest congestion')", placeholder="Search term...", key="sim_query_inp")
+            sim_k = st.slider("Number of cases to retrieve", min_value=1, max_value=10, value=3, key="sim_k_slider")
             
-            if total_pages > 1:
-                current_page = st.number_input("Page Selector", min_value=1, max_value=total_pages, value=1)
-            else:
-                current_page = 1
-                
-            start_idx = (current_page - 1) * page_size
-            end_idx = min(start_idx + page_size, len(filtered_patients))
-            page_pts = filtered_patients[start_idx:end_idx]
-            
-            if page_pts:
-                table_data = []
-                for p in page_pts:
-                    table_data.append({
-                        "Patient ID": p.get("patient_id"),
-                        "Name": p.get("name"),
-                        "Age": p.get("age"),
-                        "Gender": p.get("gender"),
-                        "Department": p.get("department"),
-                        "Assigned Doctor": p.get("assigned_doctor"),
-                        "Ward": p.get("ward") or "Discharged",
-                        "Bed": p.get("bed_number") or "N/A",
-                        "Diagnosis": p.get("diagnosis"),
-                        "Status": p.get("current_status"),
-                        "Admission Date": p.get("date_of_admission"),
-                        "Discharge Date": p.get("date_of_discharge") or "N/A"
-                    })
-                st.dataframe(table_data, use_container_width=True)
-                
-                st.write("---")
-                st.subheader("Profile Selection")
-                target_options = {f"{p['patient_id']} - {p['name']}": p['patient_id'] for p in page_pts}
-                selected_open_id = st.selectbox("Select Patient to Open Profile", list(target_options.keys()))
-                actual_id = target_options[selected_open_id]
-                
-                if st.button("🩺 Open Patient Profile in Doctor Workspace", use_container_width=True):
-                    st.session_state.selected_patient_id = actual_id
-                    st.session_state.current_page = "🩺 Doctor Workspace"
-                    st.rerun()
-            else:
-                st.info("No records match your criteria.")
+            if st.button("🔍 Search Similar Patients", key="search_similar_btn"):
+                if not sim_query.strip():
+                    st.warning("Please enter a clinical query.")
+                else:
+                    with st.spinner("Searching FAISS patient vectors..."):
+                        try:
+                            matches = search_similar_patients(sim_query.strip(), k=sim_k)
+                            
+                            if not matches:
+                                st.info("No matching historical cases found.")
+                            else:
+                                sim_rows = []
+                                for m in matches:
+                                    pid = m["patient_id"]
+                                    dist = m["distance"]
+                                    # Similarity score conversion:
+                                    score_pct = max(0.0, min(100.0, (1.0 - (dist / 2.0)) * 100.0))
+                                    
+                                    # Fetch details from SQLite
+                                    p_record = get_patient(pid)
+                                    if p_record:
+                                        sim_rows.append({
+                                            "Patient ID": pid,
+                                            "Name": p_record["name"],
+                                            "Diagnosis": p_record["diagnosis"],
+                                            "Department": p_record["department"],
+                                            "Current Status": p_record["current_status"],
+                                            "Admission Date": p_record["date_of_admission"],
+                                            "Similarity Score": f"{score_pct:.1f}%"
+                                        })
+                                        
+                                if sim_rows:
+                                    st.dataframe(sim_rows, use_container_width=True)
+                                    
+                                    st.write("---")
+                                    st.subheader("Redirection Options")
+                                    # Open matched profile
+                                    target_pids = {f"{r['Patient ID']} - {r['Name']}": r['Patient ID'] for r in sim_rows}
+                                    selected_redir = st.selectbox("Select Patient to view profile in workspace", list(target_pids.keys()), key="sim_redir_select")
+                                    actual_redir_id = target_pids[selected_redir]
+                                    
+                                    if st.button("🩺 Open Patient Profile", key="sim_redir_btn"):
+                                        st.session_state.selected_patient_id = actual_redir_id
+                                        st.session_state.current_page = "🩺 Doctor Workspace"
+                                        st.rerun()
+                                else:
+                                    st.info("No structured database records found for matches.")
+                        except Exception as e:
+                            st.error(f"Failed to retrieve similar cases: {e}")
 
     # -----------------------------
     # 6. KNOWLEDGE BASE
@@ -1713,3 +1876,119 @@ else:
             st.write("- **Version**: 1.2.0")
             st.write("- **Developer**: Sanskriti / Hospital Ops Team")
             st.write("- **GitHub**: [github.com/hospital-ops-solutions/veraops-agent](https://github.com)")
+
+        st.write("---")
+        st.subheader("System Overview")
+        
+        # Pull live statistics
+        from rag.document_store import get_docs_index
+        from rag.patient_store import get_patients_index
+        from rag.ingestion import MANIFEST_PATH
+        
+        try:
+            kb_stats = get_knowledge_base_stats()
+            h_v_count = get_docs_index().ntotal
+            p_v_count = get_patients_index().ntotal
+            v_dim = get_docs_index().d if h_v_count > 0 else 384
+            status_v = "Rebuild Needed" if check_needs_rebuild() else "Up to Date"
+            
+            if os.path.exists(MANIFEST_PATH):
+                last_up = datetime.fromtimestamp(os.path.getmtime(MANIFEST_PATH)).strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                last_up = "N/A"
+        except Exception:
+            kb_stats = {"hospital_docs_count": 0, "patient_docs_count": 0}
+            h_v_count, p_v_count = 0, 0
+            v_dim = 384
+            status_v = "Error"
+            last_up = "N/A"
+            
+        patients_all = get_all_patients()
+        tot_pts = len(patients_all)
+        adm_pts = len([p for p in patients_all if p.get("current_status") != "Discharged"])
+        dis_pts = len([p for p in patients_all if p.get("current_status") == "Discharged"])
+        depts = sorted(list({p.get("department") for p in patients_all if p.get("department")}))
+        
+        try:
+            bed_stats = get_bed_status_stats()
+            occ_beds = bed_stats["occupied_beds"]
+            avail_beds = bed_stats["available_beds"]
+        except Exception:
+            occ_beds = 0
+            avail_beds = 1000
+            
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            with st.container(border=True):
+                st.markdown('<div class="card-header">💻 PROJECT CONFIGURATION</div>', unsafe_allow_html=True)
+                st.write(f"- **VeraOps Version**: `1.2.0` (Production)")
+                st.write(f"- **Embedding Model**: `sentence-transformers/all-MiniLM-L6-v2`")
+                st.write(f"- **LLM Model**: `{model_name}`")
+                st.write(f"- **Vector Database**: `FAISS` (Facebook AI Similarity Search)")
+                st.write(f"- **Database Engine**: `SQLite 3`")
+                st.write(f"- **AI Framework**: `LangGraph & LangChain` (Supervisor router + tools workflow)")
+                
+            with st.container(border=True):
+                st.markdown('<div class="card-header">📚 KNOWLEDGE BASE METRICS</div>', unsafe_allow_html=True)
+                st.write(f"- **Hospital Guidelines Documents**: `{kb_stats.get('hospital_docs_count', 0)}` files")
+                st.write(f"- **Patient Case History Folders**: `{kb_stats.get('patient_docs_count', 0)}` folders")
+                st.write(f"- **Total Document Assets**: `{kb_stats.get('hospital_docs_count', 0) + kb_stats.get('patient_docs_count', 0)}` files")
+                st.write(f"- **Supported Formats**: `PDF, DOCX, TXT, MD` (Markdown/Text clinical formats)")
+                
+            with st.container(border=True):
+                st.markdown('<div class="card-header">🧬 VECTOR STORE METRICS</div>', unsafe_allow_html=True)
+                st.write(f"- **Hospital Guidelines Vector Count**: `{h_v_count}` vectors")
+                st.write(f"- **Patient History Vector Count**: `{p_v_count}` vectors")
+                st.write(f"- **Total Index Chunks**: `{h_v_count + p_v_count}` vectors")
+                st.write(f"- **Embedding Dimensions**: `{v_dim}` floats")
+                st.write(f"- **Vector Store Index Status**: `{status_v}`")
+                st.write(f"- **Last Index Sync Update**: `{last_up}`")
+
+        with col_s2:
+            with st.container(border=True):
+                st.markdown('<div class="card-header">🛢️ SQL DATABASE STATS</div>', unsafe_allow_html=True)
+                st.write(f"- **Total Registered Patients**: `{tot_pts}` patients")
+                st.write(f"- **Active Admitted Patients**: `{adm_pts}` patients")
+                st.write(f"- **Discharged Patients**: `{dis_pts}` patients")
+                st.write(f"- **Registered Hospital Wards**: `10` wards (100 beds/ward)")
+                st.write(f"- **Total Wards Capacity**: `1000` hospital beds")
+                st.write(f"- **Occupied Wards Beds**: `{occ_beds}` beds")
+                st.write(f"- **Available Wards Beds**: `{avail_beds}` beds")
+                st.write(f"- **Hospital Departments**: {', '.join([f'`{d}`' for d in depts]) if depts else 'None'}")
+                
+            with st.container(border=True):
+                st.markdown('<div class="card-header">🛠️ CURRENT PROJECT DIRECTORIES</div>', unsafe_allow_html=True)
+                st.write("- `hospital_docs/` (guidelines SOP storage)")
+                st.write("- `patient_documents/` (individual patient timeline reports)")
+                st.write("- `vector_store/` (FAISS indexes and serialization)")
+                st.write("- `db/` (SQLite database helpers)")
+                st.write("- `agents/` (LangGraph state and nodes definition)")
+                st.write("- `tools/` (LangChain-compliant agent tools)")
+                st.write("- `scripts/` (database seed tools)")
+                st.write("- `data/` (raw JSON configuration data)")
+                
+        st.write("---")
+        st.write("### 🏗️ Agentic RAG Pipeline Architecture")
+        st.info("""
+        ```
+         [ User Query ]
+               │
+               ▼
+        [ LangGraph Supervisor Agent ] ──(State Memory)
+               │
+          ┌────┴────────────────────────┐
+          ▼                             ▼
+        [ Patient Retriever ]       [ Hospital Retriever ]
+        (FAISS Case Files)          (FAISS Guideline SOPs)
+          │                             │
+          └────┬────────────────────────┘
+               ▼
+        [ Context Aggregation ]
+               │
+               ▼
+        [ Groq Inference LLM ]
+               │
+               ▼
+        [ Grounded Clinical Response ] ──(How this answer was generated)
+        ```
+        """)
