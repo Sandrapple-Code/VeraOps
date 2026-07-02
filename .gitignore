@@ -24,6 +24,5 @@ __pycache__/
 .pydevproject
 
 # Generated clinical documents
-patient_documents/
-hospital_docs/
+
 vector_store/
