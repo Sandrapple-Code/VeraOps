@@ -5,6 +5,7 @@ import json
 import glob
 from datetime import datetime
 from typing import Dict, Any, List
+from groq import Groq
 
 # Ensure the project root is in sys.path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
