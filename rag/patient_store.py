@@ -2,7 +2,7 @@ import faiss
 import numpy as np
 import os
 import pickle
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 from rag.embeddings import get_embedding
 
 # Paths for saving the index and metadata inside the vector_store/patient_index/ directory
@@ -80,13 +80,14 @@ def embed_patient(patient_text: str) -> np.ndarray:
     """
     return get_embedding(patient_text)
 
-def add_patient_vector(patient_id: str, vector: np.ndarray, patient_text: str = "") -> None:
+def add_patient_vector(patient_id: str, vector: np.ndarray, patient_text: str = "", source: Optional[str] = None) -> None:
     """
     Adds a patient embedding vector to the patient FAISS store and saves the index.
     
     :param patient_id: ID of the patient.
     :param vector: 1D or 2D numpy array representing the embedding vector.
     :param patient_text: The formatted text summary of the patient.
+    :param source: Optional source filename.
     """
     global _patient_metadata
     index = get_patients_index()
@@ -100,7 +101,8 @@ def add_patient_vector(patient_id: str, vector: np.ndarray, patient_text: str = 
     # Append mapping metadata
     _patient_metadata.append({
         "patient_id": patient_id,
-        "text": patient_text
+        "text": patient_text,
+        "source": source
     })
     
     # Auto-save index to disk to ensure persistence
@@ -168,6 +170,7 @@ def search_similar_patients(query: str, k: int = 5) -> List[Dict[str, Any]]:
             results.append({
                 "patient_id": meta["patient_id"],
                 "text": meta["text"],
+                "source": meta.get("source", "Unknown"),
                 "distance": float(dist)
             })
     return results

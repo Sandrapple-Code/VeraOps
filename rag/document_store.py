@@ -2,7 +2,7 @@ import faiss
 import numpy as np
 import os
 import pickle
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union, Optional
 from rag.embeddings import get_embeddings, get_embedding
 
 # Paths for saving the index and metadata inside the vector_store/hospital_index/ directory
@@ -12,7 +12,7 @@ METADATA_PATH = os.path.join(PROJECT_ROOT, "vector_store", "hospital_index", "do
 
 # In-memory store for the current index and chunks
 _index = None
-_chunks: List[str] = []
+_chunks: List[Any] = []
 
 def get_docs_index() -> faiss.IndexFlatL2:
     """
@@ -53,11 +53,11 @@ def clear_document_store() -> None:
         except Exception:
             pass
 
-def create_doc_embeddings(chunks: List[str]) -> None:
+def create_doc_embeddings(chunks: Union[List[str], List[Dict[str, Any]]], source: Optional[str] = None, page: Optional[int] = None) -> None:
     """
     Generates embeddings for chunks and adds them to the document FAISS index.
     
-    :param chunks: List of text chunks.
+    :param chunks: List of text chunks or dicts containing text and metadata.
     """
     if not chunks:
         return
@@ -65,14 +65,29 @@ def create_doc_embeddings(chunks: List[str]) -> None:
     global _chunks
     index = get_docs_index()
     
+    text_chunks = []
+    meta_chunks = []
+    
+    for c in chunks:
+        if isinstance(c, dict):
+            text_chunks.append(c["text"])
+            meta_chunks.append(c)
+        else:
+            text_chunks.append(c)
+            meta_chunks.append({
+                "text": c,
+                "source": source or "Unknown",
+                "page": page
+            })
+            
     # Generate embeddings (must be float32 for FAISS)
-    embeddings = get_embeddings(chunks)
+    embeddings = get_embeddings(text_chunks)
     
     # Add to FAISS index
     index.add(embeddings)
     
     # Track the metadata chunks
-    _chunks.extend(chunks)
+    _chunks.extend(meta_chunks)
 
 def save_faiss_index(index_path: str = INDEX_PATH, metadata_path: str = METADATA_PATH) -> None:
     """
@@ -111,10 +126,21 @@ def search_docs(query: str, k: int = 5) -> List[Dict[str, Any]]:
     results = []
     for dist, idx in zip(distances[0], indices[0]):
         if idx != -1 and idx < len(_chunks):
-            results.append({
-                "text": _chunks[idx],
-                "distance": float(dist)
-            })
+            chunk_val = _chunks[idx]
+            if isinstance(chunk_val, dict):
+                results.append({
+                    "text": chunk_val.get("text", ""),
+                    "source": chunk_val.get("source", "Unknown"),
+                    "page": chunk_val.get("page"),
+                    "distance": float(dist)
+                })
+            else:
+                results.append({
+                    "text": chunk_val,
+                    "source": "Unknown",
+                    "page": None,
+                    "distance": float(dist)
+                })
     return results
 
 if __name__ == "__main__":

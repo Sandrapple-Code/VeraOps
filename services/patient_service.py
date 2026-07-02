@@ -8,7 +8,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from db.sqlite import add_patient, get_patient, occupy_bed, release_bed
+from db.sqlite import add_patient, get_patient, occupy_bed, release_bed, add_timeline_event
 from rag.ingestion import index_patient_documents
 from scripts.seed_database import (
     generate_patient_summary,
@@ -98,6 +98,27 @@ def register_new_patient(data: Dict[str, Any]) -> str:
     # 3. Reserve Selected Bed
     if db_data["ward"] and db_data["bed_number"]:
         occupy_bed(db_data["ward"], db_data["bed_number"], patient_id, db_data["date_of_admission"])
+        
+    # Log admission timeline events in database
+    add_timeline_event(
+        patient_id=patient_id,
+        event_type="Patient Registered",
+        description=f"Registered new patient {name} (ID: {patient_id}) in system.",
+        doctor=db_data["assigned_doctor"]
+    )
+    add_timeline_event(
+        patient_id=patient_id,
+        event_type="Admission",
+        description=f"Admitted under {db_data['department']} department.",
+        doctor=db_data["assigned_doctor"]
+    )
+    if db_data["ward"] and db_data["bed_number"]:
+        add_timeline_event(
+            patient_id=patient_id,
+            event_type="Bed Allocation",
+            description=f"Allocated bed {db_data['bed_number']} in ward {db_data['ward']}.",
+            doctor=db_data["assigned_doctor"]
+        )
         
     # 4. Create document folder and generate Markdown files
     doc_dir = os.path.join(PROJECT_ROOT, "patient_documents", patient_id)

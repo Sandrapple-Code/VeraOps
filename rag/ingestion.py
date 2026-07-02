@@ -1,6 +1,7 @@
 import os
 import json
 import glob
+import fitz # PyMuPDF
 from typing import Dict, Any, List, Callable, Optional, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -130,18 +131,28 @@ def rebuild_knowledge_base(progress_callback: Optional[Callable[[float, str], No
             
         try:
             if f.lower().endswith(".pdf"):
-                text = load_pdf(f)
+                doc = fitz.open(f)
+                try:
+                    for page_num in range(len(doc)):
+                        page = doc.load_page(page_num)
+                        page_text = page.get_text()
+                        if page_text.strip():
+                            chunks = splitter.split_text(page_text)
+                            if chunks:
+                                create_doc_embeddings(chunks, source=f, page=page_num + 1)
+                                hospital_chunks_count += len(chunks)
+                finally:
+                    doc.close()
             elif f.lower().endswith(".md"):
                 text = load_md(f)
+                if text.strip():
+                    chunks = splitter.split_text(text)
+                    if chunks:
+                        create_doc_embeddings(chunks, source=f, page=None)
+                        hospital_chunks_count += len(chunks)
             else:
                 processed_files += 1
                 continue
-                
-            if text.strip():
-                chunks = splitter.split_text(text)
-                if chunks:
-                    create_doc_embeddings(chunks)
-                    hospital_chunks_count += len(chunks)
         except Exception as e:
             print(f"Error processing hospital document {f}: {e}")
             
@@ -165,7 +176,7 @@ def rebuild_knowledge_base(progress_callback: Optional[Callable[[float, str], No
                     if chunk.strip():
                         # Embed chunk and register with patient store
                         vector = embed_patient(chunk)
-                        add_patient_vector(patient_id, vector, chunk)
+                        add_patient_vector(patient_id, vector, chunk, source=filename)
                         patient_chunks_count += 1
         except Exception as e:
             print(f"Error processing patient document {f}: {e}")
@@ -242,7 +253,7 @@ def index_patient_documents(patient_id: str) -> None:
                 for chunk in chunks:
                     if chunk.strip():
                         vector = embed_patient(chunk)
-                        add_patient_vector(patient_id, vector, chunk)
+                        add_patient_vector(patient_id, vector, chunk, source=os.path.basename(f))
         except Exception as e:
             print(f"Error incrementally indexing patient file {f}: {e}")
             

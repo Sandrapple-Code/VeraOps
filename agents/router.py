@@ -45,6 +45,7 @@ AVAILABLE TOOLS:
 ROUTING PROTOCOL:
 - If a query mentions a patient by name (e.g. "Rahul Sharma"), first run `patient_lookup` to find their Patient ID (e.g., 'P001'). 
 - Once you have the Patient ID in the "Previously Executed Tool Outputs", run subsequent queries (like `patient_history_search` or `similar_case_search`) using the specific Patient ID or matched symptoms.
+- If the User Query is a follow-up or does not explicitly mention a patient name or Patient ID, check the Conversation History to identify if a patient (name or ID) was previously discussed. If so, automatically use that patient's name or Patient ID for tool calls (like `patient_lookup`, `patient_history_search`, etc.).
 - If you need hospital policies, SOPs, or ICU guidelines, run `hospital_knowledge_search`.
 - If the question can be answered completely using the outputs already gathered in the "Previously Executed Tool Outputs" section, do NOT call any more tools. Transition to finish by returning an empty "tool_calls" list.
 
